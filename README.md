@@ -4,14 +4,14 @@
 
 - S3 bucket that will store the python code.
 - SNS topic to send alerts during the code execution
-- Organization Unit (OU) 
+- Organization Unit (OU) -- ### Not yet implemented
 
 ---
 
 ## Instructions
 
 Open a CloudShell terminal from the AWS Management Console
-Con the top-right, click the "Actions" button to display the menu. Then click "Upload flle".
+On the top-right, click the "Actions" button to display the menu. Then click "Upload flle".
 Select the yaml file provided (template.yaml) and wait until you see the "file upload successful" message.
 
 Create the stack using the following command:
@@ -19,10 +19,10 @@ Create the stack using the following command:
 aws cloudformation create-stack
     --stack-name CloudGuardRailChallenge \\\
     --template-body file://template.yaml \\\
+    --capabilities CAPABILITY_IAM \\\
     --parameters ParameterKey=SNSTopicArn,ParameterValue=[Your SNS topic name] \\\
       ParameterKey=S3BucketName,ParameterValue=[Your S3 bucket name] \\\
-	    ParameterKey=ScriptFileName,ParameterValue=lambda_function.zip \\\
-      ParameterKey=OrganizationalUnitId,ParameterValue=[Your Organizational Unit ID]
+	    ParameterKey=ScriptFileName,ParameterValue=lambda_function.zip
 
 Wait until you see a successful message.
 
