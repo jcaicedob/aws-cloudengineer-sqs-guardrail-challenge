@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy a lambda function and perform some additinal tasks
+
+Parameters:
+  LambdaRuntime:
+    Type: String
+    Default: python3.9
+    Description: Lambda function runtime
+  LambdaMemorySize:
+    Type: Number
+    Default: 128
+    Description: Lambda function memory size
+  S3BucketName:
+    Type: String
+    Default: ''
+    Description: S3 bucket ARN that contains the code to be deployed
+  ScriptFileName:
+    Type: String
+    Default: ''
+    Description: File name of the Python script to be executed (zip)
+  SNSTopicArn:
+    Type: String
+    Default: ''
+    Description: ARN of the SNS topic for alerts
+  # OrganizationalUnitId:
+  #   Type: String
+  #   Default: ''
+  #   Description: Organizational Unit ID to apply the Control Tower Guardrail
+
+Resources:
+  LambdaPermissionBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument: 
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action: sns:Publish
+            Resource: arn:aws:sns:*:*:*               
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+          - Effect: Allow
+            Action:
+              - ec2:DescribeVpcEndpoints
+              - sqs:getqueueattributes
+              - sqs:listqueuetags
+            Resource: "*"
+      Description: Permission boundary for the Lambda execution role.
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      PermissionsBoundary: !Ref LambdaPermissionBoundary
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/${ScriptFileName}'
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref SNSTopicArn                
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - ec2:*
+                  - sqs:*
+                Resource: "*"
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: SQSValidationLambda
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: !Ref LambdaRuntime
+      Handler: lambda_function.lambda_handler
+      MemorySize: !Ref LambdaMemorySize
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: !Ref ScriptFileName
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref SNSTopicArn
+
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.sqs
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+            - sqs.amazonaws.com
+          eventName:
+            - CreateQueue
+      Targets:
+        - Arn: !GetAtt 
+            - LambdaFunction
+            - Arn
+          Id: LambdaFunctionTarget
+
+  EventBridgeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref LambdaFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EventBridgeRule.Arn
+  # ControlTowerGuardrail:
+  #   Type: AWS::ControlTower::EnabledControl
+  #   Properties:
+  #     ControlIdentifier: "arn:aws:controltower:us-east-1::control/require-sqs-dlq"
+  #     TargetIdentifier: !Ref OrganizationalUnitId
+
+Outputs:
+  LambdaFunctionArn:
+    Description: ARN of the Lambda function.
+    Value: !GetAtt LambdaFunction.Arn
+
+  LambdaExecutionRoleArn:
+    Description: ARN of the IAM role.
+    Value: !GetAtt LambdaExecutionRole.Arn
+
+  EventBridgeRuleArn:
+    Description: ARN of the EventBridge rule.
+    Value: !GetAtt EventBridgeRule.Arn
